@@ -182,6 +182,10 @@ resource "aws_lambda_function" "api" {
       MATCHER_HOST = "matcher.${aws_service_discovery_private_dns_namespace.main.name}"
       MATCHER_PORT = "50051"
       MEMORYDB_ENDPOINT = aws_memorydb_cluster.orderbook.cluster_endpoint
+      # Add new payment variables
+      STRIPE_SECRET_NAME = aws_secretsmanager_secret.stripe.name
+      USER_TABLE_NAME = aws_dynamodb_table.user_accounts.name
+      LEDGER_TABLE_NAME = aws_dynamodb_table.credit_ledger.name
     }
   }
 
@@ -254,6 +258,93 @@ resource "aws_apigatewayv2_route" "provider_status" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/provider/status"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "create_payment_intent" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/payments/create-intent"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "stripe_webhook" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /webhooks/stripe"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_balance" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/payments/balance"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+# Payment System - DynamoDB Tables
+resource "aws_dynamodb_table" "user_accounts" {
+  name           = "gollem-user-accounts"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "user_id"
+  stream_enabled = true
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "email"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "email-index"
+    hash_key           = "email"
+    projection_type    = "ALL"
+  }
+
+  tags = {
+    Name = "gollem-user-accounts"
+    Service = "payments"
+  }
+}
+
+resource "aws_dynamodb_table" "credit_ledger" {
+  name           = "gollem-credit-ledger"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "transaction_id"
+  range_key      = "timestamp"
+
+  attribute {
+    name = "transaction_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "timestamp"
+    type = "N"
+  }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "user-transactions"
+    hash_key           = "user_id"
+    range_key         = "timestamp"
+    projection_type    = "ALL"
+  }
+
+  tags = {
+    Name = "gollem-credit-ledger"
+    Service = "payments"
+  }
+}
+
+# Payment System - Secrets Manager
+resource "aws_secretsmanager_secret" "stripe" {
+  name        = "gollem/stripe"
+  description = "Stripe API credentials"
 }
 
 # ECS Cluster for Rust Service
@@ -345,6 +436,16 @@ resource "aws_iam_role" "lambda" {
 resource "aws_iam_role_policy_attachment" "lambda_vpc" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_dynamodb" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_secrets" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
 }
 
 resource "aws_iam_role" "ecs" {

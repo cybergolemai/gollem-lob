@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use futures::StreamExt;
+use redis::{Client, Commands, Connection, RedisError};
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod matcher {
     tonic::include_proto!("matcher");
@@ -26,7 +30,16 @@ struct Bid {
     prompt: String, 
     max_price: Decimal,
     max_latency: u32,
-    timestamp: u64
+    timestamp: u64,
+    user_id: String,
+    required_credits: Decimal,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreditBalance {
+    user_id: String,
+    balance: Decimal,
+    last_updated: u64,
 }
 
 #[derive(Debug)]
@@ -42,11 +55,121 @@ impl MatcherService {
             stale_threshold: 120, // 2 minutes
         }
     }
+
+    async fn verify_credits(&self, user_id: &str, required_credits: Decimal) -> Result<bool, RedisError> {
+        let mut conn = self.redis.get_connection()?;
+        let balance_key = format!("credit:balance:{}", user_id);
+        
+        let balance: Option<String> = conn.get(&balance_key)?;
+        let current_balance = match balance {
+            Some(b) => Decimal::from_str(&b).unwrap_or(Decimal::ZERO),
+            None => Decimal::ZERO,
+        };
+
+        Ok(current_balance >= required_credits)
+    }
+
+    async fn deduct_credits(
+        &self,
+        user_id: &str,
+        amount: Decimal,
+        provider_id: &str,
+    ) -> Result<(), RedisError> {
+        let mut conn = self.redis.get_connection()?;
+        let balance_key = format!("credit:balance:{}", user_id);
+        
+        let balance: Option<String> = conn.get(&balance_key)?;
+        let current_balance = match balance {
+            Some(b) => Decimal::from_str(&b).unwrap_or(Decimal::ZERO),
+            None => Decimal::ZERO,
+        };
+
+        let new_balance = (current_balance - amount)
+            .round_dp_with_strategy(8, RoundingStrategy::ToZero);
+
+        if new_balance < Decimal::ZERO {
+            return Err(RedisError::from((
+                redis::ErrorKind::ResponseError,
+                "Insufficient credits",
+            )));
+        }
+
+        let transaction = serde_json::json!({
+            "user_id": user_id,
+            "amount": amount.to_string(),
+            "balance_after": new_balance.to_string(),
+            "provider_id": provider_id,
+            "timestamp": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        });
+
+        let mut pipe = redis::pipe();
+        pipe.atomic()
+            .set(&balance_key, new_balance.to_string())
+            .rpush(
+                format!("credit:transactions:{}", user_id),
+                transaction.to_string(),
+            );
+
+        pipe.query(&mut conn)?;
+
+        Ok(())
+    }
+
+    fn update_ask(&self, conn: &mut Connection, ask: &Ask) -> redis::RedisResult<()> {
+        let key = format!("ask:{}:{}", ask.provider_id, ask.model);
+        conn.set(&key, serde_json::to_string(ask).unwrap())?;
+
+        conn.zadd(
+            format!("price:{}:{}", ask.model, ask.gpu_type),
+            &ask.provider_id,
+            ask.price.to_string()
+        )?;
+
+        conn.zadd(
+            format!("latency:{}:{}", ask.model, ask.gpu_type),
+            &ask.provider_id,
+            ask.max_latency
+        )
+    }
+
+    fn find_best_match(&self, conn: &mut Connection, bid: &Bid) -> redis::RedisResult<Option<Ask>> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let asks: Vec<String> = conn.zrangebyscore(
+            format!("price:{}:*", bid.model),
+            "-inf",
+            bid.max_price.to_string()
+        )?;
+
+        let mut valid_asks: Vec<Ask> = Vec::new();
+        for provider_id in asks {
+            let key = format!("ask:{}:{}", provider_id, bid.model);
+            if let Ok(ask_data) = conn.get::<_, String>(&key) {
+                if let Ok(ask) = serde_json::from_str::<Ask>(&ask_data) {
+                    // Maintain stale threshold check
+                    if ask.max_latency <= bid.max_latency 
+                        && now - ask.last_heartbeat <= self.stale_threshold {
+                        valid_asks.push(ask);
+                    }
+                }
+            }
+        }
+
+        valid_asks.sort_by(|a, b| a.price.cmp(&b.price));
+        Ok(valid_asks.first().cloned())
+    }
 }
 
 #[tonic::async_trait]
 impl matcher::matcher_service_server::MatcherService for MatcherService {
     type SubmitBidStreamStream = futures::stream::BoxStream<'static, Result<matcher::StreamResponse, Status>>;
+    
     async fn submit_bid(
         &self,
         request: Request<matcher::BidRequest>
@@ -56,27 +179,45 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
             Status::internal(format!("Redis connection failed: {}", e))
         })?;
 
+        // Parse bid with credit information
         let internal_bid = Bid {
-            model: bid.model,
-            prompt: bid.prompt,
-            max_price: bid.max_price.parse().map_err(|_| {
+            model: bid.model.clone(),
+            prompt: bid.prompt.clone(),
+            max_price: Decimal::from_str(&bid.max_price).map_err(|_| {
                 Status::invalid_argument("Invalid price format")
             })?,
             max_latency: bid.max_latency,
-            timestamp: chrono::Utc::now().timestamp() as u64
+            timestamp: chrono::Utc::now().timestamp() as u64,
+            user_id: bid.user_id.clone(),
+            required_credits: Decimal::from_str(&bid.required_credits).unwrap_or_else(|_| {
+                // Fallback credit calculation if not provided
+                Decimal::from(bid.prompt.len() as i64).div(Decimal::from(4))
+            }),
         };
 
+        // Verify credits before proceeding
+        if !self.verify_credits(&internal_bid.user_id, internal_bid.required_credits).await
+            .map_err(|e| Status::internal(format!("Credit verification failed: {}", e)))? {
+            return Err(Status::failed_precondition("Insufficient credits"));
+        }
+
+        // Find matching provider
         let best_ask = self.find_best_match(&mut conn, &internal_bid)
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("No matching provider available"))?;
+
+        // Deduct credits only after finding a match
+        self.deduct_credits(
+            &internal_bid.user_id,
+            internal_bid.required_credits,
+            &best_ask.provider_id
+        ).await.map_err(|e| Status::internal(format!("Credit deduction failed: {}", e)))?;
 
         Ok(Response::new(matcher::BidResponse {
             provider_id: best_ask.provider_id,
             status: "matched".to_string()
         }))
     }
-
-    type SubmitBidStreamStream = futures::stream::BoxStream<'static, Result<matcher::StreamResponse, Status>>;
 
     async fn submit_bid_stream(
         &self,
@@ -89,15 +230,33 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
 
         let internal_bid = Bid {
             model: bid.model.clone(),
-            prompt: bid.prompt,
-            max_price: bid.max_price.parse()?,
+            prompt: bid.prompt.clone(),
+            max_price: Decimal::from_str(&bid.max_price).map_err(|_| {
+                Status::invalid_argument("Invalid price format")
+            })?,
             max_latency: bid.max_latency,
-            timestamp: chrono::Utc::now().timestamp() as u64
+            timestamp: chrono::Utc::now().timestamp() as u64,
+            user_id: bid.user_id.clone(),
+            required_credits: Decimal::from_str(&bid.required_credits).unwrap_or_else(|_| {
+                Decimal::from(bid.prompt.len() as i64).div(Decimal::from(4))
+            }),
         };
+
+        // Verify and deduct credits before streaming
+        if !self.verify_credits(&internal_bid.user_id, internal_bid.required_credits).await
+            .map_err(|e| Status::internal(format!("Credit verification failed: {}", e)))? {
+            return Err(Status::failed_precondition("Insufficient credits"));
+        }
 
         let best_ask = self.find_best_match(&mut conn, &internal_bid)
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("No matching provider available"))?;
+
+        self.deduct_credits(
+            &internal_bid.user_id,
+            internal_bid.required_credits,
+            &best_ask.provider_id
+        ).await.map_err(|e| Status::internal(format!("Credit deduction failed: {}", e)))?;
 
         let stream = forward_request_stream(best_ask, internal_bid).await?;
         Ok(Response::new(Box::pin(stream)))
@@ -146,7 +305,6 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
             }
         }
 
-        // Update provider counts
         for depth in model_depths.values_mut() {
             depth.provider_count = active_providers.iter()
                 .filter(|p| keys.iter().any(|k| k.contains(p)))
@@ -202,7 +360,7 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
         let req = request.into_inner();
         let metrics = self.latency_router.get_metrics(
             &req.provider_id,
-            Duration::from_secs(req.time_window_secs)
+            std::time::Duration::from_secs(req.time_window_secs)
         ).await;
 
         Ok(Response::new(matcher::LatencyMetrics {
@@ -247,60 +405,10 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
     }
 }
 
-impl MatcherService {
-    fn update_ask(&self, conn: &mut Connection, ask: &Ask) -> redis::RedisResult<()> {
-        // Store full ask data
-        let key = format!("ask:{}:{}", ask.provider_id, ask.model);
-        conn.set(&key, serde_json::to_string(ask).unwrap())?;
-
-        // Update sorted sets for efficient querying
-        conn.zadd(
-            format!("price:{}:{}", ask.model, ask.gpu_type),
-            &ask.provider_id,
-            ask.price.to_string()
-        )?;
-
-        conn.zadd(
-            format!("latency:{}:{}", ask.model, ask.gpu_type),
-            &ask.provider_id,
-            ask.max_latency
-        )
-    }
-
-    fn find_best_match(&self, conn: &mut Connection, bid: &Bid) -> redis::RedisResult<Option<Ask>> {
-        let now = chrono::Utc::now().timestamp() as u64;
-        
-        // Get asks sorted by price
-        let asks: Vec<String> = conn.zrangebyscore(
-            format!("price:{}:*", bid.model),
-            "-inf",
-            bid.max_price.to_string()
-        )?;
-
-        // Filter and find best match
-        let mut valid_asks: Vec<Ask> = Vec::new();
-        for provider_id in asks {
-            let key = format!("ask:{}:{}", provider_id, bid.model);
-            if let Ok(ask_data) = conn.get::<_, String>(&key) {
-                if let Ok(ask) = serde_json::from_str::<Ask>(&ask_data) {
-                    if ask.max_latency <= bid.max_latency 
-                        && now - ask.last_heartbeat <= self.stale_threshold {
-                        valid_asks.push(ask);
-                    }
-                }
-            }
-        }
-
-        Ok(valid_asks.into_iter()
-            .min_by_key(|ask| (ask.price, ask.max_latency))
-            .cloned())
-    }
-}
-
 async fn forward_request_stream(
     ask: Ask,
     bid: Bid,
-) -> Result<impl Stream<Item = Result<matcher::StreamResponse, Status>>, Status> {
+) -> Result<impl futures::Stream<Item = Result<matcher::StreamResponse, Status>>, Status> {
     let client = reqwest::Client::new();
     
     let request_body = serde_json::json!({
