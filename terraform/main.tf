@@ -192,9 +192,40 @@ resource "aws_apigatewayv2_integration" "lambda" {
   integration_method = "POST"
 }
 
-resource "aws_apigatewayv2_route" "main" {
+# API Routes
+resource "aws_apigatewayv2_route" "generate" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/generate"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "orderbook_status" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/orderbook/status"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "provider_circuit" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/provider/circuit"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "provider_ratelimit" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/provider/ratelimit"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "provider_latency" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/provider/latency"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "provider_status" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/provider/status"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 

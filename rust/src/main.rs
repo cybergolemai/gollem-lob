@@ -46,6 +46,7 @@ impl MatcherService {
 
 #[tonic::async_trait]
 impl matcher::matcher_service_server::MatcherService for MatcherService {
+    type SubmitBidStreamStream = futures::stream::BoxStream<'static, Result<matcher::StreamResponse, Status>>;
     async fn submit_bid(
         &self,
         request: Request<matcher::BidRequest>
@@ -100,6 +101,119 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
 
         let stream = forward_request_stream(best_ask, internal_bid).await?;
         Ok(Response::new(Box::pin(stream)))
+    }
+
+    async fn get_order_book_status(
+        &self,
+        request: Request<matcher::OrderBookRequest>
+    ) -> Result<Response<matcher::OrderBookStatus>, Status> {
+        let mut conn = self.redis.get_connection().map_err(|e| {
+            Status::internal(format!("Redis connection failed: {}", e))
+        })?;
+
+        let model = request.into_inner().model;
+        let pattern = match model.as_str() {
+            "" => "ask:*".to_string(),
+            m => format!("ask:*:{}", m)
+        };
+
+        let keys: Vec<String> = conn.keys(&pattern)?;
+        let now = chrono::Utc::now().timestamp() as u64;
+        
+        let mut active_providers = std::collections::HashSet::new();
+        let mut model_depths = std::collections::HashMap::new();
+        let mut min_price = rust_decimal::Decimal::MAX;
+        let mut max_price = rust_decimal::Decimal::MIN;
+
+        for key in keys {
+            if let Ok(ask_data) = conn.get::<_, String>(&key) {
+                if let Ok(ask) = serde_json::from_str::<Ask>(&ask_data) {
+                    if now - ask.last_heartbeat <= self.stale_threshold {
+                        active_providers.insert(ask.provider_id.clone());
+                        
+                        let depth = model_depths.entry(ask.model.clone())
+                            .or_insert_with(|| matcher::ModelDepth {
+                                model: ask.model.clone(),
+                                ask_count: 0,
+                                provider_count: 0,
+                            });
+                        
+                        depth.ask_count += 1;
+                        min_price = min_price.min(ask.price);
+                        max_price = max_price.max(ask.price);
+                    }
+                }
+            }
+        }
+
+        // Update provider counts
+        for depth in model_depths.values_mut() {
+            depth.provider_count = active_providers.iter()
+                .filter(|p| keys.iter().any(|k| k.contains(p)))
+                .count() as u32;
+        }
+
+        Ok(Response::new(matcher::OrderBookStatus {
+            total_asks: keys.len() as u32,
+            active_providers: active_providers.len() as u32,
+            depths: model_depths.into_values().collect(),
+            last_match_timestamp: now,
+            min_price: min_price.to_string(),
+            max_price: max_price.to_string(),
+        }))
+    }
+
+    async fn get_circuit_status(
+        &self,
+        request: Request<matcher::CircuitStatusRequest>
+    ) -> Result<Response<matcher::CircuitStatus>, Status> {
+        let provider_id = request.into_inner().provider_id;
+        let providers = self.circuit_breaker.get_status(&provider_id).await;
+
+        Ok(Response::new(matcher::CircuitStatus {
+            provider_id: provider_id.clone(),
+            state: providers.state as i32,
+            failure_count: providers.failures,
+            last_failure_timestamp: providers.last_failure.elapsed().as_secs(),
+            reset_timestamp: providers.reset_after.elapsed().as_secs(),
+        }))
+    }
+
+    async fn get_rate_limit_status(
+        &self,
+        request: Request<matcher::RateLimitRequest>
+    ) -> Result<Response<matcher::RateLimitStatus>, Status> {
+        let provider_id = request.into_inner().provider_id;
+        let status = self.rate_limiter.get_status(&provider_id).await;
+
+        Ok(Response::new(matcher::RateLimitStatus {
+            provider_id,
+            remaining_tokens: status.remaining_tokens,
+            tokens_per_second: status.tokens_per_second,
+            reset_timestamp: status.reset_at.elapsed().as_secs(),
+            is_limited: status.is_limited,
+        }))
+    }
+
+    async fn get_latency_metrics(
+        &self,
+        request: Request<matcher::LatencyRequest>
+    ) -> Result<Response<matcher::LatencyMetrics>, Status> {
+        let req = request.into_inner();
+        let metrics = self.latency_router.get_metrics(
+            &req.provider_id,
+            Duration::from_secs(req.time_window_secs)
+        ).await;
+
+        Ok(Response::new(matcher::LatencyMetrics {
+            provider_id: req.provider_id,
+            p50_ms: metrics.p50.as_millis() as f64,
+            p95_ms: metrics.p95.as_millis() as f64,
+            p99_ms: metrics.p99.as_millis() as f64,
+            sample_count: metrics.samples,
+            window_start_timestamp: metrics.window_start.timestamp() as u64,
+            window_end_timestamp: metrics.window_end.timestamp() as u64,
+        }))
     }
 
     async fn update_provider_status(
