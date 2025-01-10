@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package matcher;
+
+service MatcherService {
+  rpc SubmitBid (BidRequest) returns (BidResponse);
+  rpc SubmitBidStream (BidRequest) returns (stream StreamResponse);
+}
+
+message Bid {
+  string model = 1;
+  string prompt = 2;
+  string max_price = 3;  // Decimal string for precision
+  uint32 max_latency = 4;
+  uint64 timestamp = 5;
+}
+
+message BidRequest {
+  Bid bid = 1;
+}
+
+message BidResponse {
+  string provider_id = 1;
+  string status = 2;
+}
+
+message StreamResponse {
+  string model = 1;
+  string created_at = 2;
+  string response = 3;
+  bool done = 4;
+  optional string done_reason = 5;
+}
+
+message Ask {
+  string provider_id = 1;
+  string model = 2;
+  string gpu_type = 3;
+  string price = 4;  // Decimal string
+  uint32 max_latency = 5;
+  uint32 available_tokens = 6;
+}
