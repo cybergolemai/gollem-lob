@@ -1,0 +1,5 @@
+redis==5.0.1
+nvidia-ml-py==12.535.77
+psutil==5.9.8
+requests==2.31.0
+schedule==1.2.1
