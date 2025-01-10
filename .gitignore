@@ -1,0 +1,15 @@
+# Rust
+/rust/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node
+/lambda/node_modules/
+/lambda/package-lock.json
+/lambda/lambda.zip
+
+# Terraform
+/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
