@@ -1,0 +1,84 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - 'alertmanager:9093'
+
+rule_files:
+  - 'rules/*.yml'
+
+scrape_configs:
+  - job_name: 'matcher'
+    static_configs:
+      - targets: ['matcher:50051']
+    metrics_path: '/metrics'
+    scheme: http
+
+  - job_name: 'provider'
+    static_configs:
+      - targets: ['provider:9100']
+    metrics_path: '/metrics'
+
+  - job_name: 'memorydb'
+    static_configs:
+      - targets: ['memorydb:9121']
+    metrics_path: '/metrics'
+
+  - job_name: 'api_gateway'
+    static_configs:
+      - targets: ['api_gateway:9090']
+    metrics_path: '/metrics'
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+
+rules:
+  - alert: MatcherDown
+    expr: up{job="matcher"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Matcher service is down"
+
+  - alert: HighLatency
+    expr: matcher_request_duration_seconds{quantile="0.95"} > 0.5
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High matching latency"
+      description: "95th percentile latency above 500ms"
+
+  - alert: StaleProviders
+    expr: provider_heartbeat_age_seconds > 120
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Stale provider heartbeats"
+      description: "Provider heartbeats are more than 2 minutes old"
+
+  - alert: OrderBookLowDepth
+    expr: orderbook_depth < 5
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Low order book depth"
+      description: "Order book has fewer than 5 active providers"
+
+  - alert: HighMemoryUsage
+    expr: (node_memory_MemTotal_bytes - node_memory_MemFree_bytes) / node_memory_MemTotal_bytes * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage"
+      description: "Memory usage above 85%"
