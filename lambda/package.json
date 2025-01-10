@@ -4,6 +4,13 @@
   "main": "index.js",
   "dependencies": {
     "@grpc/grpc-js": "^1.9.13",
-    "@grpc/proto-loader": "^0.7.10"
+    "@grpc/proto-loader": "^0.7.10",
+    "@aws-sdk/client-cloudwatch": "^3.504.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

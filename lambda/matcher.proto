@@ -3,10 +3,21 @@ syntax = "proto3";
 package matcher;
 
 service MatcherService {
+  // Core matching operations
   rpc SubmitBid (BidRequest) returns (BidResponse);
   rpc SubmitBidStream (BidRequest) returns (stream StreamResponse);
+  rpc UpdateProviderStatus (ProviderStatusRequest) returns (ProviderStatusResponse);
+
+  // Order book operations
+  rpc GetOrderBookStatus (OrderBookRequest) returns (OrderBookStatus);
+  
+  // System health operations
+  rpc GetCircuitStatus (CircuitStatusRequest) returns (CircuitStatus);
+  rpc GetRateLimitStatus (RateLimitRequest) returns (RateLimitStatus);
+  rpc GetLatencyMetrics (LatencyRequest) returns (LatencyMetrics);
 }
 
+// Core message types
 message Bid {
   string model = 1;
   string prompt = 2;
@@ -39,4 +50,85 @@ message Ask {
   string price = 4;  // Decimal string
   uint32 max_latency = 5;
   uint32 available_tokens = 6;
+}
+
+message ProviderStatusRequest {
+  string provider_id = 1;
+  string model = 2;
+  string gpu_type = 3;
+  string price = 4;
+  uint32 max_latency = 5;
+  uint32 available_tokens = 6;
+}
+
+message ProviderStatusResponse {
+  string status = 1;
+}
+
+// Order book status
+message OrderBookRequest {
+  string model = 1;  // Optional filter by model
+}
+
+message OrderBookStatus {
+  uint32 total_asks = 1;
+  uint32 active_providers = 2;
+  repeated ModelDepth depths = 3;
+  uint64 last_match_timestamp = 4;
+  string min_price = 5;
+  string max_price = 6;
+}
+
+message ModelDepth {
+  string model = 1;
+  uint32 ask_count = 2;
+  uint32 provider_count = 3;
+}
+
+// Circuit breaker status
+message CircuitStatusRequest {
+  string provider_id = 1;
+}
+
+message CircuitStatus {
+  string provider_id = 1;
+  CircuitState state = 2;
+  uint32 failure_count = 3;
+  uint64 last_failure_timestamp = 4;
+  uint64 reset_timestamp = 5;
+
+  enum CircuitState {
+    CLOSED = 0;
+    OPEN = 1;
+    HALF_OPEN = 2;
+  }
+}
+
+// Rate limit status
+message RateLimitRequest {
+  string provider_id = 1;
+}
+
+message RateLimitStatus {
+  string provider_id = 1;
+  double remaining_tokens = 2;
+  double tokens_per_second = 3;
+  uint64 reset_timestamp = 4;
+  bool is_limited = 5;
+}
+
+// Latency metrics
+message LatencyRequest {
+  string provider_id = 1;
+  uint64 time_window_secs = 2;
+}
+
+message LatencyMetrics {
+  string provider_id = 1;
+  double p50_ms = 2;
+  double p95_ms = 3;
+  double p99_ms = 4;
+  uint32 sample_count = 5;
+  uint64 window_start_timestamp = 6;
+  uint64 window_end_timestamp = 7;
 }
