@@ -1,7 +1,12 @@
+# Data Sources
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
+  default     = "us-west-2"
 }
 
 variable "vpc_cidr" {
@@ -31,7 +36,7 @@ variable "lambda_timeout" {
 variable "domain_name" {
   description = "API domain name"
   type        = string
-  default     = "api.gollem.ai"
+  default     = "api.cybergolem.io"
 }
 
 variable "ecr_repository" {
