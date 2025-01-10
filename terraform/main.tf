@@ -57,6 +57,25 @@ resource "aws_security_group" "lambda" {
   }
 }
 
+resource "aws_security_group" "rust" {
+  name        = "gollem-rust"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 50051
+    to_port         = 50051
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda.id] 
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # MemoryDB Resources
 resource "aws_memorydb_parameter_group" "orderbook" {
   family = "memorydb_redis7"
@@ -170,6 +189,14 @@ resource "aws_lambda_function" "api" {
     subnet_ids         = aws_subnet.private[*].id
     security_group_ids = [aws_security_group.lambda.id]
   }
+}
+
+resource "aws_lambda_permission" "api" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
 }
 
 # API Gateway
