@@ -4,20 +4,20 @@ use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use futures::StreamExt;
-use tonic::transport::Server;
 
 pub mod matcher {
     tonic::include_proto!("matcher");
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Ask {
     provider_id: String,
     model: String,
     gpu_type: String,
     price: Decimal,
     max_latency: u32,
-    available_tokens: u32
+    available_tokens: u32,
+    last_heartbeat: u64
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,6 +32,16 @@ struct Bid {
 #[derive(Debug)]
 struct MatcherService {
     redis: Client,
+    stale_threshold: u64,
+}
+
+impl MatcherService {
+    fn new(redis: Client) -> Self {
+        Self {
+            redis,
+            stale_threshold: 120, // 2 minutes
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -48,21 +58,16 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
         let internal_bid = Bid {
             model: bid.model,
             prompt: bid.prompt,
-            max_price: bid.max_price.parse().map_err(|e| {
+            max_price: bid.max_price.parse().map_err(|_| {
                 Status::invalid_argument("Invalid price format")
             })?,
             max_latency: bid.max_latency,
             timestamp: chrono::Utc::now().timestamp() as u64
         };
 
-        let asks: Vec<Ask> = conn.zrangebyscore("asks", "-inf", "+inf").map_err(|e| {
-            Status::internal("Failed to query order book")
-        })?;
-
-        let best_ask = match find_best_match(&internal_bid, &asks) {
-            Some(ask) => ask,
-            None => return Err(Status::not_found("No matching provider available"))
-        };
+        let best_ask = self.find_best_match(&mut conn, &internal_bid)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("No matching provider available"))?;
 
         Ok(Response::new(matcher::BidResponse {
             provider_id: best_ask.provider_id,
@@ -82,31 +87,100 @@ impl matcher::matcher_service_server::MatcherService for MatcherService {
         })?;
 
         let internal_bid = Bid {
-            model: bid.model,
+            model: bid.model.clone(),
             prompt: bid.prompt,
             max_price: bid.max_price.parse()?,
             max_latency: bid.max_latency,
             timestamp: chrono::Utc::now().timestamp() as u64
         };
 
-        let asks: Vec<Ask> = conn.zrangebyscore("asks", "-inf", "+inf")?;
-        let best_ask = find_best_match(&internal_bid, &asks)
+        let best_ask = self.find_best_match(&mut conn, &internal_bid)
+            .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("No matching provider available"))?;
 
         let stream = forward_request_stream(best_ask, internal_bid).await?;
         Ok(Response::new(Box::pin(stream)))
     }
+
+    async fn update_provider_status(
+        &self,
+        request: Request<matcher::ProviderStatusRequest>
+    ) -> Result<Response<matcher::ProviderStatusResponse>, Status> {
+        let status = request.into_inner();
+        let mut conn = self.redis.get_connection().map_err(|e| {
+            Status::internal(format!("Redis connection failed: {}", e))
+        })?;
+
+        let ask = Ask {
+            provider_id: status.provider_id,
+            model: status.model,
+            gpu_type: status.gpu_type,
+            price: status.price.parse().map_err(|_| {
+                Status::invalid_argument("Invalid price format")
+            })?,
+            max_latency: status.max_latency,
+            available_tokens: status.available_tokens,
+            last_heartbeat: chrono::Utc::now().timestamp() as u64
+        };
+
+        self.update_ask(&mut conn, &ask).map_err(|e| {
+            Status::internal(format!("Failed to update orderbook: {}", e))
+        })?;
+
+        Ok(Response::new(matcher::ProviderStatusResponse {
+            status: "updated".to_string()
+        }))
+    }
 }
 
-fn find_best_match(bid: &Bid, asks: &Vec<Ask>) -> Option<Ask> {
-    asks.iter()
-        .filter(|ask| {
-            ask.model == bid.model &&
-            ask.price <= bid.max_price &&
-            ask.max_latency <= bid.max_latency 
-        })
-        .min_by_key(|ask| (ask.price, ask.max_latency))
-        .cloned()
+impl MatcherService {
+    fn update_ask(&self, conn: &mut Connection, ask: &Ask) -> redis::RedisResult<()> {
+        // Store full ask data
+        let key = format!("ask:{}:{}", ask.provider_id, ask.model);
+        conn.set(&key, serde_json::to_string(ask).unwrap())?;
+
+        // Update sorted sets for efficient querying
+        conn.zadd(
+            format!("price:{}:{}", ask.model, ask.gpu_type),
+            &ask.provider_id,
+            ask.price.to_string()
+        )?;
+
+        conn.zadd(
+            format!("latency:{}:{}", ask.model, ask.gpu_type),
+            &ask.provider_id,
+            ask.max_latency
+        )
+    }
+
+    fn find_best_match(&self, conn: &mut Connection, bid: &Bid) -> redis::RedisResult<Option<Ask>> {
+        let now = chrono::Utc::now().timestamp() as u64;
+        
+        // Get asks sorted by price
+        let asks: Vec<String> = conn.zrangebyscore(
+            format!("price:{}:*", bid.model),
+            "-inf",
+            bid.max_price.to_string()
+        )?;
+
+        // Filter and find best match
+        let mut valid_asks: Vec<Ask> = Vec::new();
+        for provider_id in asks {
+            let key = format!("ask:{}:{}", provider_id, bid.model);
+            if let Ok(ask_data) = conn.get::<_, String>(&key) {
+                if let Ok(ask) = serde_json::from_str::<Ask>(&ask_data) {
+                    if ask.max_latency <= bid.max_latency 
+                        && now - ask.last_heartbeat <= self.stale_threshold {
+                        valid_asks.push(ask);
+                    }
+                }
+            }
+        }
+
+        Ok(valid_asks.into_iter()
+            .min_by_key(|ask| (ask.price, ask.max_latency))
+            .cloned())
+    }
 }
 
 async fn forward_request_stream(
@@ -155,9 +229,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let redis_url = std::env::var("REDIS_URL")
         .unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
-    let service = MatcherService {
-        redis: Client::open(redis_url)?,
-    };
+    let service = MatcherService::new(Client::open(redis_url)?);
 
     let addr = "[::0]:50051".parse()?;
     println!("MatcherService listening on {}", addr);
