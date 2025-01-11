@@ -7,7 +7,31 @@
 - Python 3.10+
 - Ollama installed and running
 
-## Initial Setup
+## Docker Setup
+
+1. Install Docker and NVIDIA Container Toolkit:
+```bash
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+sudo systemctl restart docker
+```
+
+2. Build and run:
+```bash
+cd provider
+docker build -t gollem-provider .
+docker run --gpus all -d \
+    -e REDIS_URL="redis://your-memorydb-endpoint:6379" \
+    -e PROVIDER_ID="your-provider-id" \
+    gollem-provider
+```
+
+## Manual Setup
 
 1. Install system dependencies:
 ```bash
