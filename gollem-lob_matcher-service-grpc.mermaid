@@ -1,0 +1,27 @@
+sequenceDiagram
+    %%{init: { 'theme': 'base', 'themeVariables': { 'actorBkg': '#76B900', 'actorTextColor': '#ffffff' }}}%%
+    
+    participant Client
+    participant Gateway as API Gateway
+    participant Lambda
+    participant Matcher as Matcher Service
+    participant Redis as MemoryDB
+    participant Provider
+    
+    Client->>+Gateway: POST /api/generate
+    Gateway->>+Lambda: Forward request
+    Lambda->>+Matcher: gRPC SubmitBid {model, prompt, max_price, max_latency, user_id, required_credits}
+    
+    Matcher->>Redis: Query orderbook matching criteria
+    Redis-->>Matcher: Return provider candidates
+    
+    Matcher->>Matcher: Execute Pareto-optimal matching:<br/>• Price optimization<br/>• Circuit breaker verification<br/>• Rate limit validation<br/>• Latency SLA checks
+    
+    Matcher-->>-Lambda: Return BidResponse {provider_id, status, credits, transaction_id}
+    Lambda-->>-Gateway: Forward matched provider
+    Gateway-->>-Client: Return provider endpoint
+    
+    Client->Provider: Initialize direct streaming connection
+    loop Token Generation
+        Provider-->>Client: Stream inference tokens
+    end
