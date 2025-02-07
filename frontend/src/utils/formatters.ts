@@ -1,3 +1,7 @@
+/** 
+ * @deprecated Use Decimal.js directly instead of formatters
+ */
+
 /** Usage examples
 import { formatUSD, formatCredits, calculateCreditCost } from '@/utils/formatters';
 
