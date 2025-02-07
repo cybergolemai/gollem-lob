@@ -103,21 +103,26 @@ NEXT_PUBLIC_ENABLE_ANALYTICS=true
 
 ### API Integration
 
-1. Create API client:
-```typescript
-import { createClient } from '@/lib/api';
+1. Use the API client:
+import { api } from '@/lib/api';
 
-const api = createClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+// Set authentication token (e.g., after login)
+api.setToken(userToken);
+
+// Make API calls
+const balance = await api.getCreditBalance();
+const orderBook = await api.getOrderBookStatus('gpt4');
+
+// For payment processing
+const paymentIntent = await api.createPaymentIntent(10.00);
+
+// For text generation
+const response = await api.generateText({
+  model: 'gpt4',
+  prompt: 'Your prompt here',
+  maxPrice: '0.001',
+  maxLatency: 1000
 });
-```
-
-2. Use in components:
-```typescript
-const { data, error } = useQuery(['credits'], () => 
-  api.get('/payments/balance')
-);
-```
 
 ## Payment Integration
 
