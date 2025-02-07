@@ -95,11 +95,30 @@ NEXT_PUBLIC_ENABLE_ANALYTICS=true
 - Use React Context for global UI state
 - Keep component state local when possible
 
+### Type System
+
+1. **API Types** (`/types/api.ts`):
+   - Full type coverage for all API endpoints
+   - Strict decimal string handling for financial values
+   - Comprehensive error type definitions
+   - Realtime streaming response types
+
+2. **Type Safety Guidelines**:
+   - Use decimal strings for all financial values
+   - Leverage TypeScript's strict mode
+   - Follow API response type definitions
+   - Use enums for status and error codes
+
 ### Styling Guidelines
 
 - Use Tailwind CSS utility classes
-- Follow design system tokens
-- Maintain consistent spacing and typography
+- Follow design system tokens:
+  - Use `--primary` for main actions
+  - Use `--secondary` for supporting elements
+  - Use `--destructive` for warnings/errors
+  - Use `--muted` for background elements
+- Dark mode support via `.dark` class
+- Custom animations and transitions defined in globals.css
 
 ### API Integration
 
@@ -181,6 +200,16 @@ npm run cypress
 ```
 
 ## Deployment
+
+### Import Aliases
+
+Use TypeScript path aliases for clean imports:
+- `@/components/*` - UI components
+- `@/features/*` - Feature modules
+- `@/lib/*` - Third-party integrations
+- `@/styles/*` - CSS modules
+- `@/utils/*` - Helper functions
+- `@/types/*` - Type definitions
 
 ### Production Build
 
