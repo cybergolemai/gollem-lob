@@ -17,6 +17,7 @@ npm install decimal.js @tanstack/react-query axios
 
 # UI and styling
 npm install @radix-ui/react-icons lucide-react recharts
+npm install @tanstack/react-query
 npm install -D tailwindcss postcss autoprefixer
 npm install -D tailwindcss-animate @tailwindcss/typography @tailwindcss/forms
 
@@ -25,7 +26,11 @@ npm install @stripe/stripe-js @stripe/react-stripe-js
 
 # Install shadcn/ui components
 npx shadcn-ui@latest init
+# NOTE TO SELF:
+# npx shadcn-ui@latest add card button input alert
+
 npm install @radix-ui/react-slot class-variance-authority clsx tailwind-merge
+
 # Follow the prompts to set up your design system
 
 # Add commonly used shadcn/ui components
