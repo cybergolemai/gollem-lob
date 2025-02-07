@@ -3,6 +3,23 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+provider "aws" {
+  alias  = "us-west-2"
+  region = "us-west-2"
+}
+
+variable "root_domain_name" {
+  description = "Root domain name"
+  type        = string
+  default     = "cybergolem.io"
+}
+
+variable "sns_alert_topic_arn" {
+  description = "SNS alert topic ARN"
+  type        = string
+  default     = "arn:aws:sns:us-west-2:123456789012:alert-topic"
+}
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -100,3 +117,4 @@ locals {
     "gollem-${var.environment}-credit-ledger"
   )
 }
+

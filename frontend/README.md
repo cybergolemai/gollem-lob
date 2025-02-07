@@ -9,6 +9,34 @@ Frontend application for the GoLLeM-LOB (GPU Limit Orderbook for LLM Inference) 
 cd frontend
 npm install
 
+# Core dependencies
+npm install next@latest react@latest react-dom@latest
+
+# Data handling and API
+npm install decimal.js @tanstack/react-query axios
+
+# UI and styling
+npm install @radix-ui/react-icons lucide-react recharts
+npm install -D tailwindcss postcss autoprefixer
+npm install -D tailwindcss-animate @tailwindcss/typography @tailwindcss/forms
+
+# Payment processing
+npm install @stripe/stripe-js @stripe/react-stripe-js
+
+# Install shadcn/ui components
+npx shadcn-ui@latest init
+npm install @radix-ui/react-slot class-variance-authority clsx tailwind-merge
+# Follow the prompts to set up your design system
+
+# Add commonly used shadcn/ui components
+npx shadcn-ui@latest add button
+npx shadcn-ui@latest add card
+npx shadcn-ui@latest add input
+npx shadcn-ui@latest add alert
+npx shadcn-ui@latest add dialog
+npx shadcn-ui@latest add dropdown-menu
+npx shadcn-ui@latest add toast
+
 # Set up environment variables
 cp .env.example .env.local
 
