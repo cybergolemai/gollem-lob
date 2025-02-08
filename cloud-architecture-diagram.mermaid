@@ -1,0 +1,69 @@
+flowchart TB
+    subgraph client[Client Tier]
+        direction TB
+        C[Client]
+        APIG[API Gateway]
+        C --> APIG
+    end
+
+    subgraph providers[Provider Network]
+        direction LR
+        P1[Provider 1]
+        P2[Provider 2]
+        PN[Provider N]
+        P1 & P2 & PN --> APIG
+    end
+
+    subgraph matching[Match Making Service]
+        direction TB
+        L[Lambda Function]
+        APIG --> L
+        
+        subgraph ecs[ECS Fargate]
+            R[Rust gRPC Matcher]
+            L --> |service discovery| R
+        end
+    end
+
+    subgraph state[State Management]
+        direction TB
+        MDB[MemoryDB Cluster]
+        R --> MDB
+    end
+
+    subgraph monitoring[System Monitoring]
+        direction TB
+        PROM[Prometheus]
+        CW[CloudWatch]
+        L & R --> PROM & CW
+    end
+
+    subgraph payment[Payment and Credits]
+        direction TB
+        DDB[(DynamoDB Ledger)]
+        STR[Stripe]
+        SEC[Secrets Manager]
+        L --> DDB & STR
+        L --> SEC
+    end
+
+    subgraph legend[Color Legend]
+        direction LR
+        AWS[AWS Services]
+        NVIDIA[NVIDIA GPU Providers]
+        PROM_KEY[Prometheus Monitoring]
+        STRIPE_KEY[Stripe Payments]
+        CLIENT_KEY[Client]
+    end
+
+    classDef default fill:#2A2A2A,stroke:#666,color:#fff;
+    classDef aws fill:#FF9900,stroke:#666,color:#fff;
+    classDef nvidia fill:#76B900,stroke:#666,color:#fff;
+    classDef stripe fill:#00AFE1,stroke:#666,color:#fff;
+    classDef prometheus fill:#E6522C,stroke:#666,color:#fff;
+
+    class C,CLIENT_KEY default;
+    class P1,P2,PN,NVIDIA nvidia;
+    class APIG,L,R,CW,MDB,DDB,SEC,AWS aws;
+    class STR,STRIPE_KEY stripe;
+    class PROM,PROM_KEY prometheus;

@@ -15,24 +15,64 @@ service MatcherService {
   rpc GetCircuitStatus (CircuitStatusRequest) returns (CircuitStatus);
   rpc GetRateLimitStatus (RateLimitRequest) returns (RateLimitStatus);
   rpc GetLatencyMetrics (LatencyRequest) returns (LatencyMetrics);
+
+  // Credit operations
+  rpc GetCreditBalance (CreditBalanceRequest) returns (CreditBalanceResponse);
+  rpc GetTransactionHistory (TransactionHistoryRequest) returns (TransactionHistoryResponse);
 }
 
-// Core message types
+enum ErrorCode {
+  ERROR_UNSPECIFIED = 0;
+  ERROR_INSUFFICIENT_CREDITS = 1;
+  ERROR_PROVIDER_UNAVAILABLE = 2;
+  ERROR_RATE_LIMITED = 3;
+  ERROR_CIRCUIT_OPEN = 4;
+  ERROR_INVALID_REQUEST = 5;
+  ERROR_PAYMENT_FAILED = 6;
+  ERROR_CREDIT_SYSTEM_ERROR = 7;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}
+
 message Bid {
   string model = 1;
   string prompt = 2;
   string max_price = 3;  // Decimal string for precision
   uint32 max_latency = 4;
   uint64 timestamp = 5;
+  string user_id = 6;  // Required for credit tracking
+  string required_credits = 7;  // Decimal string for precision
+  map<string, string> metadata = 8;  // For client-specific tracking
 }
 
 message BidRequest {
   Bid bid = 1;
+  bool dry_run = 2;  // For credit estimation without execution
 }
 
 message BidResponse {
   string provider_id = 1;
   string status = 2;
+  string credits_used = 3;  // Decimal string for precision
+  string credits_remaining = 4;  // Decimal string for precision
+  string transaction_id = 5;
+  PaymentStatus payment_status = 6;
+  optional string failure_reason = 7;
+  optional Error error = 8;
+  map<string, string> provider_metadata = 9;
+}
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PAYMENT_STATUS_SUCCEEDED = 1;
+  PAYMENT_STATUS_INSUFFICIENT_CREDITS = 2;
+  PAYMENT_STATUS_FAILED = 3;
+  PAYMENT_STATUS_PENDING = 4;
+  PAYMENT_STATUS_REFUNDED = 5;
 }
 
 message StreamResponse {
@@ -41,6 +81,10 @@ message StreamResponse {
   string response = 3;
   bool done = 4;
   optional string done_reason = 5;
+  string credits_used = 6;  // Running total, decimal string
+  PaymentStatus payment_status = 7;
+  optional Error error = 8;
+  map<string, string> metadata = 9;
 }
 
 message Ask {
@@ -50,6 +94,9 @@ message Ask {
   string price = 4;  // Decimal string
   uint32 max_latency = 5;
   uint32 available_tokens = 6;
+  string credit_rate = 7;  // Credits per token, decimal string
+  uint64 last_heartbeat = 8;  // Added for monitoring
+  map<string, string> capabilities = 9;  // Provider features
 }
 
 message ProviderStatusRequest {
@@ -59,15 +106,21 @@ message ProviderStatusRequest {
   string price = 4;
   uint32 max_latency = 5;
   uint32 available_tokens = 6;
+  string credit_rate = 7;  // Credits per token, decimal string
+  map<string, string> capabilities = 8;
 }
 
 message ProviderStatusResponse {
   string status = 1;
+  string earned_credits = 2;  // Decimal string
+  string pending_payout = 3;  // Decimal string
+  optional Error error = 4;
 }
 
-// Order book status
 message OrderBookRequest {
-  string model = 1;  // Optional filter by model
+  string model = 1;
+  optional string gpu_type = 2;
+  optional string max_price = 3;
 }
 
 message OrderBookStatus {
@@ -75,17 +128,21 @@ message OrderBookStatus {
   uint32 active_providers = 2;
   repeated ModelDepth depths = 3;
   uint64 last_match_timestamp = 4;
-  string min_price = 5;
-  string max_price = 6;
+  string min_price = 5;  // Decimal string
+  string max_price = 6;  // Decimal string
+  string min_credit_rate = 7;  // Decimal string
+  string max_credit_rate = 8;  // Decimal string
+  repeated string available_models = 9;
+  repeated string available_gpu_types = 10;
 }
 
 message ModelDepth {
   string model = 1;
   uint32 ask_count = 2;
   uint32 provider_count = 3;
+  map<string, uint32> gpu_distribution = 4;
 }
 
-// Circuit breaker status
 message CircuitStatusRequest {
   string provider_id = 1;
 }
@@ -96,6 +153,7 @@ message CircuitStatus {
   uint32 failure_count = 3;
   uint64 last_failure_timestamp = 4;
   uint64 reset_timestamp = 5;
+  optional Error error = 6;
 
   enum CircuitState {
     CLOSED = 0;
@@ -104,20 +162,19 @@ message CircuitStatus {
   }
 }
 
-// Rate limit status
 message RateLimitRequest {
   string provider_id = 1;
 }
 
 message RateLimitStatus {
   string provider_id = 1;
-  double remaining_tokens = 2;
-  double tokens_per_second = 3;
+  string remaining_tokens = 2;  // Decimal string for precision
+  string tokens_per_second = 3;  // Decimal string for precision
   uint64 reset_timestamp = 4;
   bool is_limited = 5;
+  optional Error error = 6;
 }
 
-// Latency metrics
 message LatencyRequest {
   string provider_id = 1;
   uint64 time_window_secs = 2;
@@ -125,10 +182,66 @@ message LatencyRequest {
 
 message LatencyMetrics {
   string provider_id = 1;
-  double p50_ms = 2;
-  double p95_ms = 3;
-  double p99_ms = 4;
+  string p50_ms = 2;  // Changed to decimal string for consistency
+  string p95_ms = 3;  // Changed to decimal string for consistency
+  string p99_ms = 4;  // Changed to decimal string for consistency
   uint32 sample_count = 5;
   uint64 window_start_timestamp = 6;
   uint64 window_end_timestamp = 7;
+  optional Error error = 8;
+}
+
+message CreditBalanceRequest {
+  string user_id = 1;
+  bool include_pending = 2;
+  bool include_history = 3;
+}
+
+message CreditBalanceResponse {
+  string balance = 1;  // Decimal string
+  string pending_credits = 2;  // Decimal string
+  string reserved_credits = 3;  // Decimal string
+  uint64 last_updated = 4;
+  bool balance_verified = 5;
+  optional Error error = 6;
+  repeated Transaction recent_transactions = 7;  // Last 5 transactions if include_history
+}
+
+message TransactionHistoryRequest {
+  string user_id = 1;
+  uint64 start_timestamp = 2;
+  uint64 end_timestamp = 3;
+  uint32 limit = 4;
+  string pagination_token = 5;
+  repeated TransactionType type_filter = 6;
+}
+
+message Transaction {
+  string transaction_id = 1;
+  string user_id = 2;
+  string amount = 3;  // Decimal string
+  string balance_after = 4;  // Decimal string
+  string provider_id = 5;
+  uint64 timestamp = 6;
+  TransactionType type = 7;
+  map<string, string> metadata = 8;
+  PaymentStatus status = 9;
+  optional Error error = 10;
+}
+
+enum TransactionType {
+  TRANSACTION_TYPE_UNSPECIFIED = 0;
+  TRANSACTION_TYPE_PURCHASE = 1;
+  TRANSACTION_TYPE_USAGE = 2;
+  TRANSACTION_TYPE_REFUND = 3;
+  TRANSACTION_TYPE_ADJUSTMENT = 4;
+  TRANSACTION_TYPE_PROVIDER_PAYOUT = 5;
+}
+
+message TransactionHistoryResponse {
+  repeated Transaction transactions = 1;
+  string next_pagination_token = 2;
+  bool has_more = 3;
+  uint32 total_count = 4;
+  optional Error error = 5;
 }
