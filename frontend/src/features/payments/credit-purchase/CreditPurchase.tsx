@@ -1,54 +1,64 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { DollarSign, CreditCard, Loader2 } from 'lucide-react';
+import { api } from '@/lib/api';
+import { Decimal } from 'decimal.js';
+import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js';
 
 const CreditPurchase = () => {
+  const router = useRouter();
+  const stripe = useStripe();
+  const elements = useElements();
+  
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [credits, setCredits] = useState(0);
-  const [balance, setBalance] = useState(null);
+  const [credits, setCredits] = useState(new Decimal(0));
+  const [balance, setBalance] = useState<string | null>(null);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
 
   // Credit conversion rate
-  const CREDIT_RATE = 0.001; // $0.001 per credit
+  const CREDIT_RATE = new Decimal('0.001'); // $0.001 per credit
 
   useEffect(() => {
+    const fetchBalance = async () => {
+      try {
+        const result = await api.getCreditBalance();
+        setBalance(result.balance);
+      } catch (err) {
+        console.error('Error fetching balance:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch balance');
+      }
+    };
+
     fetchBalance();
   }, []);
 
-  const fetchBalance = async () => {
-    try {
-      const response = await fetch('/api/payments/balance', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('userToken')}`
-        }
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBalance(parseFloat(data.balance));
-      }
-    } catch (err) {
-      console.error('Error fetching balance:', err);
-    }
-  };
-
-  const handleAmountChange = (e) => {
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     if (/^\d*\.?\d{0,2}$/.test(value)) {
       setAmount(value);
-      setCredits(Math.floor(parseFloat(value || 0) / CREDIT_RATE));
+      const decimalAmount = value ? new Decimal(value) : new Decimal(0);
+      setCredits(decimalAmount.div(CREDIT_RATE).floor());
     }
   };
 
   const handlePurchase = async () => {
-    if (!amount || parseFloat(amount) < 1) {
+    if (!stripe || !elements) {
+      setError('Payment system not initialized');
+      return;
+    }
+
+    const amountDecimal = new Decimal(amount);
+    if (amountDecimal.lessThan(1)) {
       setError('Minimum purchase amount is $1.00');
       return;
     }
-    if (parseFloat(amount) > 1000) {
+    if (amountDecimal.greaterThan(1000)) {
       setError('Maximum purchase amount is $1,000.00');
       return;
     }
@@ -57,32 +67,27 @@ const CreditPurchase = () => {
     setError('');
 
     try {
-      const response = await fetch('/api/payments/create-intent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('userToken')}`
+      const { clientSecret } = await api.createPaymentIntent(amountDecimal.toNumber());
+      
+      const { error } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/payment/confirm`,
+          payment_method_data: {
+            billing_details: {
+              // Add any additional billing details if needed
+            },
+          },
         },
-        body: JSON.stringify({
-          amount: parseFloat(amount),
-          currency: 'usd'
-        })
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to create payment intent');
+      if (error) {
+        throw new Error(error.message);
       }
 
-      const { clientSecret } = await response.json();
-      
-      // Here you would normally invoke the Stripe payment flow
-      // using the clientSecret, but we'll just show a success message
-      setAmount('');
-      setCredits(0);
-      await fetchBalance();
+      // The confirmPayment will redirect to return_url on success
     } catch (err) {
-      setError(err.message);
-    } finally {
+      setError(err instanceof Error ? err.message : 'Payment failed');
       setLoading(false);
     }
   };
@@ -95,7 +100,7 @@ const CreditPurchase = () => {
           Purchase Credits
         </CardTitle>
         <CardDescription>
-          Current Balance: {balance !== null ? `${balance.toFixed(8)} credits` : 'Loading...'}
+          Current Balance: {balance ? `${new Decimal(balance).toFixed(8)} credits` : 'Loading...'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -109,12 +114,19 @@ const CreditPurchase = () => {
               onChange={handleAmountChange}
               className="pl-10"
               placeholder="0.00"
+              disabled={loading}
             />
           </div>
-          <p className="text-sm text-gray-500">
-            You will receive approximately {credits.toLocaleString()} credits
+          <p className="text-sm text-muted-foreground">
+            You will receive approximately {credits.toFixed(0)} credits
           </p>
         </div>
+
+        {clientSecret && (
+          <div className="mt-4">
+            <PaymentElement />
+          </div>
+        )}
 
         {error && (
           <Alert variant="destructive">
@@ -126,7 +138,7 @@ const CreditPurchase = () => {
         <Button 
           className="w-full" 
           onClick={handlePurchase} 
-          disabled={loading || !amount || parseFloat(amount) < 1}
+          disabled={loading || !amount || new Decimal(amount || 0).lessThan(1)}
         >
           {loading ? (
             <>

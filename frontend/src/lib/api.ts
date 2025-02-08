@@ -1,4 +1,5 @@
 import { Decimal } from 'decimal.js';
+import { auth } from './auth';
 
 // API Response Types
 export interface ApiResponse<T> {
@@ -83,6 +84,19 @@ export class ApiClient {
     }
 
     return headers;
+  }
+
+  async verifyPaymentIntent(clientSecret: string): Promise<{
+    status: string;
+    amount: number;
+    metadata?: Record<string, any>;
+  }> {
+    const response = await fetch(`${this.baseUrl}/api/payments/verify`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ clientSecret })
+    });
+    return handleResponse(response);
   }
 
   // Credit and Payment Methods
