@@ -515,6 +515,27 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private[count.index].id
 }
 
+# Outputs
 output "api_endpoint" {
   value = aws_apigatewayv2_api.main.api_endpoint
+}
+
+output "memorydb_endpoint" {
+  value     = aws_memorydb_cluster.orderbook.cluster_endpoint
+  sensitive = true
+}
+
+output "memorydb_reader_endpoint" {
+  value     = aws_memorydb_cluster.orderbook.reader_endpoint
+  sensitive = true
+}
+
+output "memorydb_password" {
+  value     = random_password.memorydb.result
+  sensitive = true
+}
+
+output "frontend_domain_name" {  // ADDED OUTPUT
+  value = aws_cloudfront_distribution.frontend.domain_name
+  description = "CloudFront domain name for the frontend"
 }
