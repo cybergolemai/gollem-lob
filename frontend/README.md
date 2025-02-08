@@ -1,6 +1,8 @@
 # GoLLeM Frontend
 
-Frontend application for the GoLLeM-LOB (GPU Limit Orderbook for LLM Inference) platform.
+Frontend application for the GoLLeM-LOB (GPU Limit Orderbook for LLM Inference) platform. 
+
+Built with Next.js and React, this modern web application provides a seamless interface for users to interact with our GPU marketplace. The platform enables users to place limit orders for GPU compute resources and manage their inference workloads efficiently. Our frontend implements real-time order book visualization, secure payment processing through Stripe, and comprehensive transaction history tracking. The application follows best practices for accessibility, performance, and responsive design to ensure a great user experience across all devices.
 
 ## Quick Start
 
@@ -17,7 +19,6 @@ npm install decimal.js @tanstack/react-query axios
 
 # UI and styling
 npm install @radix-ui/react-icons lucide-react recharts
-npm install @tanstack/react-query
 npm install -D tailwindcss postcss autoprefixer
 npm install -D tailwindcss-animate @tailwindcss/typography @tailwindcss/forms
 

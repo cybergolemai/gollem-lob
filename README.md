@@ -2,7 +2,40 @@
 
 Market maker for LLM inference requests with Pareto-optimal matching on price, latency, and throughput.
 
+
+## Overview
+
+GoLLeM-LOB implements a limit order book system for GPU compute resources, enabling efficient matching of LLM inference requests with GPU providers. The system optimizes for:
+
+- Price efficiency through market-based allocation
+
+- Latency requirements via provider SLAs
+
+- Throughput optimization with Pareto-optimal matching
+
+## System Requirements
+
+- Node.js 18+
+
+- Rust 1.75+
+
+- Python 3.8+ (for provider agent)
+
+- AWS account with appropriate permissions
+
+- Redis-compatible database (MemoryDB)
+
 ## Quick Start
+
+Clone repository:
+
+```bash
+
+git clone https://github.com/cybergolemai/gollem-lob.git
+
+cd gollem-lob
+
+```
 
 Build Lambda package:
 ```bash
@@ -19,6 +52,24 @@ export AWS_SECRET_ACCESS_KEY="your_secret"
 cd terraform
 terraform init
 terraform apply
+```
+
+Set up local environment:
+
+```bash
+
+# Configure local development settings
+
+cp .env.example .env
+
+# Install dependencies for all components
+
+make install-deps
+
+# Start local development environment
+
+docker-compose up
+
 ```
 
 ## API Endpoints
