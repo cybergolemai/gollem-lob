@@ -13,3 +13,38 @@ Cargo.lock
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+
+# Environment
+.env
+.env*.local
+
+# Next.js
+/frontend/.next/
+/frontend/out/
+
+# Frontend Dependencies
+/frontend/node_modules/
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
+
+# TypeScript
+*.tsbuildinfo
+/frontend/next-env.d.ts
+
+# Testing
+/frontend/coverage/
+
+# Build output
+/frontend/dist/
+/frontend/build/
+
+# IDE/Editor specific
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Cache
+.eslintcache

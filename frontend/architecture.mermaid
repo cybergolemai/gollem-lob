@@ -1,0 +1,42 @@
+graph TD
+    root[gollem-lob/]
+    frontend[frontend/]
+    src[src/]
+    components[components/]
+    features[features/]
+    layouts[layouts/]
+    lib[lib/]
+    pages[pages/]
+    styles[styles/]
+    types[types/]
+    utils[utils/]
+    public[public/]
+
+    root --> frontend
+    frontend --> src
+    frontend --> public
+
+    src --> components
+    src --> features
+    src --> layouts
+    src --> lib
+    src --> pages
+    src --> styles
+    src --> types
+    src --> utils
+
+    payments[payments/]
+    features --> payments
+
+    credits[credit-purchase/]
+    dashboard[dashboard/]
+    history[transaction-history/]
+    payments --> credits
+    payments --> dashboard
+    payments --> history
+
+    credits --> CreditPurchase[CreditPurchase.tsx]
+    credits --> CreditBalance[CreditBalance.tsx]
+
+    style root fill:#f9f,stroke:#333,stroke-width:4px
+    style frontend fill:#bbf,stroke:#333,stroke-width:2px

@@ -1,0 +1,31 @@
+Here's an ordered list of files you need to create for a complete frontend implementation:
+
+gollem-lob/frontend/package.json - Core frontend dependencies
+gollem-lob/frontend/tsconfig.json - TypeScript configuration
+gollem-lob/frontend/src/pages/index.tsx - Main landing page
+gollem-lob/frontend/src/pages/dashboard.tsx - Dashboard page
+gollem-lob/frontend/src/pages/_app.tsx - Root app component
+gollem-lob/frontend/src/features/payments/credit-purchase/CreditPurchase.tsx - Credit purchase component (already created)
+gollem-lob/frontend/src/features/payments/credit-purchase/CreditBalance.tsx - Balance display component
+gollem-lob/frontend/src/lib/stripe.ts - Stripe configuration
+gollem-lob/frontend/src/lib/api.ts - API client configuration
+gollem-lob/frontend/src/components/ui/card.tsx - shadcn/ui card component
+gollem-lob/frontend/src/components/ui/button.tsx - shadcn/ui button component
+gollem-lob/frontend/src/components/ui/input.tsx - shadcn/ui input component
+gollem-lob/frontend/src/components/ui/alert.tsx - shadcn/ui alert component
+gollem-lob/frontend/src/layouts/DashboardLayout.tsx - Dashboard layout wrapper
+gollem-lob/frontend/src/styles/globals.css - Global styles
+gollem-lob/frontend/src/utils/formatters.ts - Number/currency formatting utilities
+gollem-lob/frontend/src/types/api.ts - API type definitions
+gollem-lob/frontend/next.config.js - Next.js configuration
+gollem-lob/frontend/.env.local - Environment variables
+gollem-lob/frontend/tailwind.config.js - Tailwind configuration
+
+Build/Deploy related files:
+21. gollem-lob/frontend/Dockerfile - Frontend Docker configuration
+22. gollem-lob/terraform/frontend.tf - Frontend infrastructure configuration
+After creating these files, you'll need to update:
+
+gollem-lob/terraform/main.tf - Add frontend resource references
+gollem-lob/terraform/variables.tf - Add frontend-related variables
+gollem-lob/.github/workflows/deploy.yml (if using GitHub Actions) - Add frontend deployment steps
